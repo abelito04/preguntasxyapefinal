@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Desafío Express</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #0f0f0f, #1a1a2e);
+      font-family: 'Orbitron', sans-serif;
+      color: #00ffcc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .container {
+      max-width: 500px;
+      width: 100%;
+      text-align: center;
+      padding: 2rem;
+      background: #111;
+      border: 2px solid #00ffcc;
+      border-radius: 20px;
+      box-shadow: 0 0 20px #00ffcc77;
+    }
+    input, button {
+      padding: 1rem;
+      margin: 1rem 0;
+      border-radius: 10px;
+      border: none;
+      font-size: 1rem;
+    }
+    button {
+      background: #00ffcc;
+      color: #000;
+      cursor: pointer;
+    }
+    .hidden { display: none; }
+    .opciones button {
+      background: #222;
+      color: #00ffcc;
+      border: 1px solid #00ffcc;
+      margin: 0.5rem;
+    }
+    #temporizador {
+      font-size: 2rem;
+      color: #ff0066;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Desafío Express 🧠</h1>
+
+    <div id="registro">
+      <input id="nick" type="text" placeholder="Tu nickname gamer...">
+      <button onclick="registrarJugador()">Unirme</button>
+    </div>
+
+    <div id="sala" class="hidden">
+      <p>Jugadores en sala:</p>
+      <ul id="lista-jugadores"></ul>
+      
+      <button id="btn-iniciar" onclick="iniciarJuego()" class="hidden">¡Comenzar!</button>
+    
+    </div>
+
+    <div id="pregunta" class="hidden">
+      <h2 id="texto-pregunta"></h2>
+      <div id="temporizador">⏳ 10</div>
+      <div class="opciones" id="opciones"></div>
+    </div>
+
+    <div id="resultado" class="hidden">
+      <h2 id="mensaje-resultado"></h2>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js">
+    let esOrganizador = false;
+
+    function registrarJugador() {
+      nick = document.getElementById("nick").value;
+      if (!nick) return alert("Ingresa un nickname");
+      socket.emit("nuevo_jugador", nick);
+      document.getElementById("registro").classList.add("hidden");
+      document.getElementById("sala").classList.remove("hidden");
+
+      // Solo admin_mapache verá el botón de iniciar
+      if (nick === "admin_mapache") {
+        esOrganizador = true;
+        document.getElementById("btn-iniciar").classList.remove("hidden");
+      }
+    }
+
+    function enviarRespuesta(respuesta) {
+      if (respuestasEnviadas) return;
+      respuestasEnviadas = true;
+      socket.emit("enviar_respuestas", [{ nick, respuesta }]);
+
+      const botones = document.querySelectorAll("#opciones button");
+      botones.forEach(btn => {
+        if (btn.textContent === respuesta) {
+          btn.style.border = "2px solid orange";
+        }
+        btn.disabled = true;
+      });
+    }
+
+    socket.on("verificar_respuestas", () => {
+      const botones = document.querySelectorAll("#opciones button");
+      botones.forEach(btn => {
+        const correcto = btn.textContent === document.getElementById("texto-pregunta").textContent.split(": ")[1];
+        if (btn.style.border === "2px solid orange") {
+          btn.style.backgroundColor = correcto ? "green" : "red";
+        }
+      });
+    });
+    </script>
+</body>
+  <script>
+    const socket = io();
+    let nick = "";
+    let respuestasEnviadas = false;
+
+    function registrarJugador() {
+      nick = document.getElementById("nick").value;
+      if (!nick) return alert("Ingresa un nickname");
+      socket.emit("nuevo_jugador", nick);
+      document.getElementById("registro").classList.add("hidden");
+      document.getElementById("sala").classList.remove("hidden");
+    }
+
+    function iniciarJuego() {
+      socket.emit("iniciar_juego");
+    }
+
+    socket.on("jugadores_actualizados", (lista) => {
+      const ul = document.getElementById("lista-jugadores");
+      ul.innerHTML = "";
+      lista.forEach(j => {
+        const li = document.createElement("li");
+        li.textContent = j;
+        ul.appendChild(li);
+      });
+    });
+
+    socket.on("nueva_pregunta", ({ pregunta, ronda }) => {
+      document.getElementById("sala").classList.add("hidden");
+      document.getElementById("pregunta").classList.remove("hidden");
+      document.getElementById("texto-pregunta").textContent = `Ronda ${ronda}: ${pregunta.pregunta}`;
+      const opcionesDiv = document.getElementById("opciones");
+      opcionesDiv.innerHTML = "";
+      pregunta.opciones.forEach(op => {
+        const btn = document.createElement("button");
+        btn.textContent = op;
+        btn.onclick = () => enviarRespuesta(op);
+        opcionesDiv.appendChild(btn);
+      });
+      iniciarTemporizador();
+    });
+
+    function enviarRespuesta(respuesta) {
+      if (respuestasEnviadas) return;
+      respuestasEnviadas = true;
+      socket.emit("enviar_respuestas", [{ nick, respuesta }]);
+    }
+
+    function iniciarTemporizador() {
+      let tiempo = 10;
+      const temp = document.getElementById("temporizador");
+      temp.textContent = `⏳ ${tiempo}`;
+      const interval = setInterval(() => {
+        tiempo--;
+        temp.textContent = `⏳ ${tiempo}`;
+        if (tiempo <= 0) {
+          clearInterval(interval);
+        }
+      }, 1000);
+    }
+
+    socket.on("ganador", (nombre) => {
+      mostrarResultado(`${nombre} es el ganador 🏆`);
+    });
+
+    socket.on("sin_jugadores", () => {
+      mostrarResultado("No hay suficientes jugadores para continuar.");
+    });
+
+    function mostrarResultado(msg) {
+      document.getElementById("pregunta").classList.add("hidden");
+      document.getElementById("resultado").classList.remove("hidden");
+      document.getElementById("mensaje-resultado").textContent = msg;
+    }
+  
+    let esOrganizador = false;
+
+    function registrarJugador() {
+      nick = document.getElementById("nick").value;
+      if (!nick) return alert("Ingresa un nickname");
+      socket.emit("nuevo_jugador", nick);
+      document.getElementById("registro").classList.add("hidden");
+      document.getElementById("sala").classList.remove("hidden");
+
+      // Solo admin_mapache verá el botón de iniciar
+      if (nick === "admin_mapache") {
+        esOrganizador = true;
+        document.getElementById("btn-iniciar").classList.remove("hidden");
+      }
+    }
+
+    function enviarRespuesta(respuesta) {
+      if (respuestasEnviadas) return;
+      respuestasEnviadas = true;
+      socket.emit("enviar_respuestas", [{ nick, respuesta }]);
+
+      const botones = document.querySelectorAll("#opciones button");
+      botones.forEach(btn => {
+        if (btn.textContent === respuesta) {
+          btn.style.border = "2px solid orange";
+        }
+        btn.disabled = true;
+      });
+    }
+
+    socket.on("verificar_respuestas", () => {
+      const botones = document.querySelectorAll("#opciones button");
+      botones.forEach(btn => {
+        const correcto = btn.textContent === document.getElementById("texto-pregunta").textContent.split(": ")[1];
+        if (btn.style.border === "2px solid orange") {
+          btn.style.backgroundColor = correcto ? "green" : "red";
+        }
+      });
+    });
+    </script>
+</body>
+</body>
+</html>
